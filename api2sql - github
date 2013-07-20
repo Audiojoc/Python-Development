@@ -1,0 +1,245 @@
+import argparse
+import codecs
+import xml.etree.ElementTree as et
+import urllib2
+from xml.dom.minidom import parseString
+from time import sleep
+import fileinput, sys
+import re
+
+#Return all Match IDs
+
+def nthOccur(n, searchString, theString):
+    return len(searchString.join(theString.split(searchString,n)[:n]))
+
+f = open('matchIds.xml', 'w')
+
+#return all Match IDs procedure
+def print_all_match_ids():
+    account_id_url = urllib2.urlopen('https://api.steampowered.com/IDOTA2Match_570/GetMatchHistory/V001/?format=XML&account_id=' '&key=' '&min_players=10')
+    data = account_id_url.read()
+    f.write(str(data))
+    start_results_remaining = data.find('<results_remaining>')
+    end_results_remaining = data.find('<',start_results_remaining +1)
+    results_remaining = int( data[start_results_remaining + 19 : end_results_remaining])
+    while results_remaining > 25:
+        #turns the 25th occurence index into an integer
+        match_id_start_index = int (nthOccur(25, '<match_id>', data))
+        #retrieves the last match id based on the match_id_start_index
+        last_match_id = int (data[match_id_start_index+10:match_id_start_index+19])
+        #subtracts 1 from last_match_id to give new url input
+        last_match_minus_one = last_match_id - 1
+        #new url
+        account_id_url = urllib2.urlopen('https://api.steampowered.com/IDOTA2Match_570/GetMatchHistory/V001/?format=XML&account_id=' '&start_at_match_id='+str(last_match_minus_one)+'&key=' '&min_players=10') 
+        data = account_id_url.read()
+        f.write(str(data))
+        start_results_remaining = data.find('<results_remaining>')
+        end_results_remaining = data.find('<',start_results_remaining +1)
+        results_remaining = int( data[start_results_remaining + 19 : end_results_remaining])
+  sleep(1)
+    else:
+        #if results remaining is less than 25, then use as nthOccurr
+        match_id_start_index = int (nthOccur(results_remaining, '<match_id>', data))
+        #retrieves the last match id based on the match_id_start_index
+        last_match_id = int (data[match_id_start_index+10:match_id_start_index+19])
+        #subtracts 1 from last_match_id to give new url input
+        last_match_minus_one = last_match_id - 1
+        #new url
+        account_id_url = urllib2.urlopen('https://api.steampowered.com/IDOTA2Match_570/GetMatchHistory/V001/?format=XML&account_id=' '&start_at_match_id='+str(last_match_minus_one)+'&key=' '&min_players=10') 
+        data = account_id_url.read()
+        f.write(str(data))
+        start_results_remaining = data.find('<results_remaining>')
+        end_results_remaining = data.find('<',start_results_remaining +1)
+        results_remaining = int( data[start_results_remaining + 19 : end_results_remaining])
+        sleep (2)
+
+print print_all_match_ids()
+
+f.close()
+
+#Return all Match Details
+
+#opens the previously created list of match_ids
+rf = open("matchIds.xml", "r")
+data = rf.read()
+
+#opens file for writing match_details
+f = open("matchDetails.xml", "w")
+
+#finds <match_id>
+def find_match_id(data):
+    start_match_id = data.find('<match_id>')
+    if start_match_id == -1:
+        return None, 0
+    end_match_id = data.find('<',start_match_id +1)
+    match_id = data[start_match_id + 10 : end_match_id]
+    return match_id, end_match_id
+
+#prints all match_ids
+def print_all_match_details(data):
+    while True:
+        match_id, end_match_id = find_match_id(data)
+        if match_id:
+            match_id_url = urllib2.urlopen('https://api.steampowered.com/IDOTA2Match_570/GetMatchDetails/V001/?format=XML&match_id='+str(match_id)+'&key=' '')
+            match_details = match_id_url.read()
+            f.write(str(match_details))
+            data = data[end_match_id:]
+            sleep(2)
+        else:
+            break
+
+print print_all_match_details(data)
+
+f.close()
+
+#removes XML headers
+for line in fileinput.input('matchDetails.xml', inplace=True):
+    line = line.replace('<?xml version="1.0" encoding="UTF-8"?>', '')
+    line = line.replace('<!DOCTYPE result>','')
+    sys.stdout.write(line)
+fileinput.close()
+
+#writes the first header back in	
+with open('matchDetails.xml', 'r+') as f:
+    old = f.read()
+    f.seek(0)
+    f.write('<?xml version="1.0" encoding="UTF-8"?>\n' + '<!DOCTYPE result>\n' + '<matches>\n' + old + '\n')
+    f.close()
+
+#appends a closing matches tag to the end of the file	
+with open('matchDetails.xml', 'a') as f:
+    f.write('</matches>\n')
+    f.close()
+
+#clears the text then rewrites	
+with open('matchDetails.xml', 'r+') as f:
+    data = f.read()
+    f.close()
+#removes ability_upgrade tags inc. nested.	
+with open('matchDetails.xml', 'w') as f:
+    ability_clean = re.sub('(?ms)<ability_upgrades>.*?</ability_upgrades>', '', data)
+    additional_units_clean = re.sub('(?ms)<additional_units>.*?</additional_units>', '', ability_clean)
+    f.write(additional_units_clean)
+    f.close() 
+	
+rf.close()
+
+# parse arguments
+parser = argparse.ArgumentParser(description='Convert an xml file to csv format.')
+parser.add_argument('--input', dest='input_file', required=True, help='input xml filename')
+parser.add_argument('--output', dest='output_file', required=True, help='output csv filename')
+parser.add_argument('--tag', dest='tag', required=True, help='the record tag. eg: item')
+parser.add_argument('--delimiter', dest='delimiter', default=', ', help='delimiter character. (default=, comma-space)')
+parser.add_argument('--ignore', dest='ignore', default='', nargs='+', help='list of tags to ignore')
+parser.add_argument('--no-header', dest='header', action='store_false', default=True, help='do not print csv header (default=False)')
+parser.add_argument('--encoding', dest='encoding', default='utf-8', help='character encoding (default=utf-8)')
+parser.add_argument('--limit', type=int, dest='limit', default=-1, help='maximum number of records to process')
+parser.add_argument('--buffer', type=int, dest='buffer', default='1000', help='number of records to keep in buffer before writing to disk (default=1000)')
+args = parser.parse_args()
+
+# output file handle
+output = codecs.open(args.output_file, "w", encoding=args.encoding)
+
+# open the xml file for iteration
+context = et.iterparse(args.input_file, events=("start", "end"))
+context = iter(context)
+
+# get to the root
+event, root = context.next()
+
+items = []
+header = []
+output_buffer = []
+field_name = ''
+
+tagged = False
+started = False
+n = 0
+
+
+def write_buffer():
+    """
+    Write records from buffer to the output file
+    """
+    global output_buffer, output
+    
+    output.write('\n'.join(output_buffer) + '\n')
+    output_buffer = []
+    
+    print ".",
+
+
+def show_stats():
+    print "\n\nWrote", n, "records to", args.output_file
+
+# iterate through the xml
+for event, elem in context:
+    # if elem is an unignored child node of the record tag, it should be written to buffer
+    should_write = elem.tag != args.tag and started and elem.tag not in args.ignore
+    # and if the user wants a header and we have not created one yet, we should tag it too
+    should_tag = not tagged and should_write and args.header
+
+    if event == 'start':
+        if elem.tag == args.tag and not started:
+            started = True
+        elif should_tag:
+            # if elem is nested inside a "parent", field name becomes parent_elem
+            field_name = '_'.join((field_name, elem.tag)) if field_name else elem.tag
+
+    else:
+        if should_write:
+            if should_tag:
+                header.append(field_name)  # add field name to csv header
+                # remove current tag from the tag name chain
+                field_name = field_name.rpartition('_' + elem.tag)[0]
+            items.append('' if elem.text is None else elem.text.strip().replace('"', r'\"'))
+
+        # end of traversing the record tag
+        elif elem.tag == args.tag and len(items) > 0:
+            # csv header (element tag names)
+            if args.header and not tagged:
+                output.write('#' + args.delimiter.join(header) + '\n')
+            tagged = True
+
+            # send the csv to buffer
+            output_buffer.append(r'' + (r'' + args.delimiter + r'').join(items) + r'')
+            items = []
+            n += 1
+
+            # halt if the specified limit has been hit
+            if n == args.limit:
+                break
+
+            # flush buffer to disk
+            if len(output_buffer) > args.buffer:
+                write_buffer()
+
+        elem.clear()  # discard element and recover memory
+
+write_buffer()  # write rest of the buffer to file
+show_stats()
+
+import csv
+import MySQLdb
+
+#open the connection to the MySQL server.
+# using MySQLdb
+mydb = MySQLdb.connect(host=' ', user=' ', passwd=' ', db=' ')
+cursor = mydb.cursor()
+
+cursor.execute('DELETE FROM Match_details');
+
+#read the hero_ids_paths.csv file using the python
+# csv module http://docs/python.org/library/csv.html
+csv_data = csv.reader(file('matchDetails.csv'))
+
+#execute the for clicle and insert the csv into the database
+for row in csv_data:
+
+	cursor.execute('INSERT INTO Match_details(Player_01_account_id,Player_01_player_slot,Player_01_hero_id,Player_01_item_0,Player_01_item_1,Player_01_item_2,Player_01_item_3,Player_01_item_4,Player_01_item_5,Player_01_kills,Player_01_deaths,Player_01_assists,Player_01_leaver_status,Player_01_gold,Player_01_last_hits,Player_01_denies,Player_01_gold_per_min,Player_01_xp_per_min,Player_01_gold_spent,Player_01_hero_damage,Player_01_tower_damage,Player_01_hero_healing,Player_01_level,Player_01_empty,Player_02_account_id,Player_02_player_slot,Player_02_hero_id,Player_02_item_0,Player_02_item_1,Player_02_item_2,Player_02_item_3,Player_02_item_4,Player_02_item_5,Player_02_kills,Player_02_deaths,Player_02_assists,Player_02_leaver_status,Player_02_gold,Player_02_last_hits,Player_02_denies,Player_02_gold_per_min,Player_02_xp_per_min,Player_02_gold_spent,Player_02_hero_damage,Player_02_tower_damage,Player_02_hero_healing,Player_02_level,Player_02_empty,Player_03_account_id,Player_03_player_slot,Player_03_hero_id,Player_03_item_0,Player_03_item_1,Player_03_item_2,Player_03_item_3,Player_03_item_4,Player_03_item_5,Player_03_kills,Player_03_deaths,Player_03_assists,Player_03_leaver_status,Player_03_gold,Player_03_last_hits,Player_03_denies,Player_03_gold_per_min,Player_03_xp_per_min,Player_03_gold_spent,Player_03_hero_damage,Player_03_tower_damage,Player_03_hero_healing,Player_03_level,Player_03_empty,Player_04_account_id,Player_04_player_slot,Player_04_hero_id,Player_04_item_0,Player_04_item_1,Player_04_item_2,Player_04_item_3,Player_04_item_4,Player_04_item_5,Player_04_kills,Player_04_deaths,Player_04_assists,Player_04_leaver_status,Player_04_gold,Player_04_last_hits,Player_04_denies,Player_04_gold_per_min,Player_04_xp_per_min,Player_04_gold_spent,Player_04_hero_damage,Player_04_tower_damage,Player_04_hero_healing,Player_04_level,Player_04_empty,Player_05_account_id,Player_05_player_slot,Player_05_hero_id,Player_05_item_0,Player_05_item_1,Player_05_item_2,Player_05_item_3,Player_05_item_4,Player_05_item_5,Player_05_kills,Player_05_deaths,Player_05_assists,Player_05_leaver_status,Player_05_gold,Player_05_last_hits,Player_05_denies,Player_05_gold_per_min,Player_05_xp_per_min,Player_05_gold_spent,Player_05_hero_damage,Player_05_tower_damage,Player_05_hero_healing,Player_05_level,Player_05_empty,Player_06_account_id,Player_06_player_slot,Player_06_hero_id,Player_06_item_0,Player_06_item_1,Player_06_item_2,Player_06_item_3,Player_06_item_4,Player_06_item_5,Player_06_kills,Player_06_deaths,Player_06_assists,Player_06_leaver_status,Player_06_gold,Player_06_last_hits,Player_06_denies,Player_06_gold_per_min,Player_06_xp_per_min,Player_06_gold_spent,Player_06_hero_damage,Player_06_tower_damage,Player_06_hero_healing,Player_06_level,Player_06_empty,Player_07_account_id,Player_07_player_slot,Player_07_hero_id,Player_07_item_0,Player_07_item_1,Player_07_item_2,Player_07_item_3,Player_07_item_4,Player_07_item_5,Player_07_kills,Player_07_deaths,Player_07_assists,Player_07_leaver_status,Player_07_gold,Player_07_last_hits,Player_07_denies,Player_07_gold_per_min,Player_07_xp_per_min,Player_07_gold_spent,Player_07_hero_damage,Player_07_tower_damage,Player_07_hero_healing,Player_07_level,Player_07_empty,Player_08_account_id,Player_08_player_slot,Player_08_hero_id,Player_08_item_0,Player_08_item_1,Player_08_item_2,Player_08_item_3,Player_08_item_4,Player_08_item_5,Player_08_kills,Player_08_deaths,Player_08_assists,Player_08_leaver_status,Player_08_gold,Player_08_last_hits,Player_08_denies,Player_08_gold_per_min,Player_08_xp_per_min,Player_08_gold_spent,Player_08_hero_damage,Player_08_tower_damage,Player_08_hero_healing,Player_08_level,Player_08_empty,Player_09_account_id,Player_09_player_slot,Player_09_hero_id,Player_09_item_0,Player_09_item_1,Player_09_item_2,Player_09_item_3,Player_09_item_4,Player_09_item_5,Player_09_kills,Player_09_deaths,Player_09_assists,Player_09_leaver_status,Player_09_gold,Player_09_last_hits,Player_09_denies,Player_09_gold_per_min,Player_09_xp_per_min,Player_09_gold_spent,Player_09_hero_damage,Player_09_tower_damage,Player_09_hero_healing,Player_09_level,Player_09_empty,Player_10_account_id,Player_10_player_slot,Player_10_hero_id,Player_10_item_0,Player_10_item_1,Player_10_item_2,Player_10_item_3,Player_10_item_4,Player_10_item_5,Player_10_kills,Player_10_deaths,Player_10_assists,Player_10_leaver_status,Player_10_gold,Player_10_last_hits,Player_10_denies,Player_10_gold_per_min,Player_10_xp_per_min,Player_10_gold_spent,Player_10_hero_damage,Player_10_tower_damage,Player_10_hero_healing,Player_10_level,Player_10_empty,Players,Radiant_win,Duration,Start_time,Match_id,Match_seq_num,Tower_status_radiant,Tower_status_dire,Barracks_status_radiant,Barracks_status_dire,Cluster,First_blood_time,Lobby_type,Human_players,Leagueid,Positive_votes,Negative_votes,Game_mode)' 'VALUES(%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s,%s)', row)
+
+#close the connection to the database.
+mydb.commit()
+cursor.close()
+print "Import to MySQL is done"
+
